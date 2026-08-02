@@ -3,20 +3,12 @@ import gc
 import shutil
 import uuid
 
-
 # ==============================
 # MODEL PATH
 # ==============================
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
-
-MODEL_PATH = os.path.join(
-    BASE_DIR,
-    "yolov8n.pt"
-)
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "yolov8n.pt")
 
 # ==============================
 # LIMIT CPU THREADS
@@ -25,11 +17,9 @@ MODEL_PATH = os.path.join(
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
-
 import torch
 
 torch.set_num_threads(1)
-
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,25 +57,11 @@ app.add_middleware(
 # FOLDERS
 # ==============================
 
-UPLOAD_FOLDER = os.path.join(
-    BASE_DIR,
-    "uploads"
-)
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+RESULT_FOLDER = os.path.join(BASE_DIR, "results")
 
-RESULT_FOLDER = os.path.join(
-    BASE_DIR,
-    "results"
-)
-
-os.makedirs(
-    UPLOAD_FOLDER,
-    exist_ok=True
-)
-
-os.makedirs(
-    RESULT_FOLDER,
-    exist_ok=True
-)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 
 # ==============================
@@ -94,11 +70,20 @@ os.makedirs(
 
 app.mount(
     "/results",
-    StaticFiles(
-        directory=RESULT_FOLDER
-    ),
+    StaticFiles(directory=RESULT_FOLDER),
     name="results"
 )
+
+
+# ==============================
+# LOAD YOLO MODEL ONCE
+# ==============================
+
+print("Loading YOLO model from:", MODEL_PATH)
+
+model = YOLO(MODEL_PATH)
+
+print("YOLO model loaded successfully")
 
 
 # ==============================
@@ -107,10 +92,8 @@ app.mount(
 
 @app.get("/")
 def home():
-
     return {
-        "message":
-        "SmartVision AI Backend is Running"
+        "message": "SmartVision AI Backend is Running"
     }
 
 
@@ -120,10 +103,8 @@ def home():
 
 @app.get("/health")
 def health():
-
     return {
-        "status":
-        "healthy"
+        "status": "healthy"
     }
 
 
@@ -136,13 +117,7 @@ async def upload_image(
     file: UploadFile = File(...)
 ):
 
-    model = None
-    results = None
-
-    unique_id = (
-        uuid.uuid4().hex[:8]
-    )
-
+    unique_id = uuid.uuid4().hex[:8]
 
     # ==============================
     # FILE EXTENSION
@@ -151,7 +126,6 @@ async def upload_image(
     extension = os.path.splitext(
         file.filename
     )[1].lower()
-
 
     # ==============================
     # VALIDATE IMAGE
@@ -163,49 +137,32 @@ async def upload_image(
         ".png",
         ".webp"
     ]:
-
         return JSONResponse(
-
             status_code=400,
-
             content={
-
-                "error":
-                "Only JPG, JPEG, PNG and WEBP images are allowed."
-
+                "error": "Only JPG, JPEG, PNG and WEBP images are allowed."
             }
-
         )
 
-
-    original_filename = (
-        file.filename
-    )
-
+    original_filename = file.filename
 
     # ==============================
     # FILE NAMES
     # ==============================
 
-    safe_filename = (
-        f"{unique_id}{extension}"
-    )
+    safe_filename = f"{unique_id}{extension}"
 
     upload_path = os.path.join(
         UPLOAD_FOLDER,
         safe_filename
     )
 
-
-    result_filename = (
-        f"result_{safe_filename}"
-    )
+    result_filename = f"result_{safe_filename}"
 
     result_path = os.path.join(
         RESULT_FOLDER,
         result_filename
     )
-
 
     try:
 
@@ -225,43 +182,17 @@ async def upload_image(
 
 
         # ==============================
-        # LOAD YOLO MODEL
-        # ==============================
-
-        print(
-            "Loading YOLO model from:",
-            MODEL_PATH
-        )
-
-        model = YOLO(
-            MODEL_PATH
-        )
-
-        print(
-            "YOLO model loaded successfully"
-        )
-
-
-        # ==============================
         # RUN AI DETECTION
         # ==============================
 
         results = model.predict(
-
             source=upload_path,
-
             save=False,
-
             verbose=False,
-
             imgsz=320,
-
             device="cpu",
-
             max_det=10,
-
             conf=0.25
-
         )
 
 
@@ -270,7 +201,6 @@ async def upload_image(
         # ==============================
 
         detections = []
-
         object_counts = {}
 
 
@@ -279,7 +209,6 @@ async def upload_image(
         # ==============================
 
         for result in results:
-
 
             # ==============================
             # SAVE RESULT IMAGE
@@ -304,53 +233,39 @@ async def upload_image(
                     box.conf[0]
                 )
 
-                class_name = (
-                    model.names[
-                        class_id
-                    ]
+                class_name = model.names[
+                    class_id
+                ]
+
+                detections.append(
+                    {
+                        "object": class_name,
+                        "confidence": round(
+                            confidence * 100,
+                            2
+                        )
+                    }
                 )
-
-
-                detections.append({
-
-                    "object":
-                    class_name,
-
-                    "confidence":
-                    round(
-                        confidence * 100,
-                        2
-                    )
-
-                })
 
 
                 # ==============================
                 # COUNT OBJECTS
                 # ==============================
 
-                object_counts[
-                    class_name
-                ] = object_counts.get(
-
-                    class_name,
-
-                    0
-
-                ) + 1
+                object_counts[class_name] = (
+                    object_counts.get(
+                        class_name,
+                        0
+                    ) + 1
+                )
 
 
         # ==============================
         # DELETE UPLOADED IMAGE
         # ==============================
 
-        if os.path.exists(
-            upload_path
-        ):
-
-            os.remove(
-                upload_path
-            )
+        if os.path.exists(upload_path):
+            os.remove(upload_path)
 
 
         # ==============================
@@ -358,9 +273,6 @@ async def upload_image(
         # ==============================
 
         del results
-
-        del model
-
         gc.collect()
 
 
@@ -369,36 +281,17 @@ async def upload_image(
         # ==============================
 
         return JSONResponse(
-
             content={
-
-                "message":
-                "Image analyzed successfully",
-
-                "filename":
-                original_filename,
-
-                "detections":
-                detections,
-
-                "object_counts":
-                object_counts,
-
-                "result_image":
-                "/results/"
-                + result_filename
-
+                "message": "Image analyzed successfully",
+                "filename": original_filename,
+                "detections": detections,
+                "object_counts": object_counts,
+                "result_image": "/results/" + result_filename
             }
-
         )
 
 
     except Exception as e:
-
-
-        # ==============================
-        # PRINT ERROR
-        # ==============================
 
         print(
             "ERROR:",
@@ -410,22 +303,13 @@ async def upload_image(
         # DELETE UPLOADED FILE
         # ==============================
 
-        if os.path.exists(
-            upload_path
-        ):
-
-            os.remove(
-                upload_path
-            )
+        if os.path.exists(upload_path):
+            os.remove(upload_path)
 
 
         # ==============================
         # CLEAN MEMORY
         # ==============================
-
-        del results
-
-        del model
 
         gc.collect()
 
@@ -435,17 +319,9 @@ async def upload_image(
         # ==============================
 
         return JSONResponse(
-
             status_code=500,
-
             content={
-
-                "error":
-                "Image analysis failed",
-
-                "details":
-                str(e)
-
+                "error": "Image analysis failed",
+                "details": str(e)
             }
-
         )
