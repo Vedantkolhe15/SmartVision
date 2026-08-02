@@ -3,6 +3,14 @@ import gc
 import shutil
 import uuid
 
+# Limit CPU threads to reduce memory usage on Render
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+
+import torch
+
+torch.set_num_threads(1)
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -58,24 +66,26 @@ app.mount(
 
 
 # ==============================
-# LOAD YOLO MODEL ONCE
-# ==============================
-
-print("Loading YOLO model...")
-
-model = YOLO("yolov8n.pt")
-
-print("YOLO model loaded successfully")
-
-
-# ==============================
 # HOME
 # ==============================
 
 @app.get("/")
 def home():
+
     return {
         "message": "SmartVision AI Backend is Running"
+    }
+
+
+# ==============================
+# HEALTH CHECK
+# ==============================
+
+@app.get("/health")
+def health():
+
+    return {
+        "status": "healthy"
     }
 
 
@@ -84,13 +94,23 @@ def home():
 # ==============================
 
 @app.post("/upload-image")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(
+    file: UploadFile = File(...)
+):
+
+    model = None
+    results = None
 
     unique_id = uuid.uuid4().hex[:8]
 
     extension = os.path.splitext(
         file.filename
     )[1].lower()
+
+
+    # ==============================
+    # VALIDATE IMAGE
+    # ==============================
 
     if extension not in [
         ".jpg",
@@ -100,11 +120,16 @@ async def upload_image(file: UploadFile = File(...)):
     ]:
 
         return JSONResponse(
+
             status_code=400,
+
             content={
+
                 "error":
                 "Only JPG, JPEG, PNG and WEBP images are allowed."
+
             }
+
         )
 
 
@@ -147,7 +172,24 @@ async def upload_image(file: UploadFile = File(...)):
 
 
         # ==============================
-        # RUN YOLO DETECTION
+        # LOAD YOLO MODEL
+        # ==============================
+
+        print(
+            "Loading YOLO model..."
+        )
+
+        model = YOLO(
+            "yolov8n.pt"
+        )
+
+        print(
+            "YOLO model loaded successfully"
+        )
+
+
+        # ==============================
+        # RUN AI DETECTION
         # ==============================
 
         results = model.predict(
@@ -162,10 +204,16 @@ async def upload_image(file: UploadFile = File(...)):
 
             device="cpu",
 
-            max_det=20
+            max_det=10,
+
+            conf=0.25
 
         )
 
+
+        # ==============================
+        # DETECTION DATA
+        # ==============================
 
         detections = []
 
@@ -178,10 +226,14 @@ async def upload_image(file: UploadFile = File(...)):
 
         for result in results:
 
+            # Save result image
+
             result.save(
                 filename=result_path
             )
 
+
+            # Process detected objects
 
             for box in result.boxes:
 
@@ -215,8 +267,11 @@ async def upload_image(file: UploadFile = File(...)):
                 object_counts[
                     class_name
                 ] = object_counts.get(
+
                     class_name,
+
                     0
+
                 ) + 1
 
 
@@ -238,6 +293,8 @@ async def upload_image(file: UploadFile = File(...)):
         # ==============================
 
         del results
+
+        del model
 
         gc.collect()
 
@@ -279,6 +336,10 @@ async def upload_image(file: UploadFile = File(...)):
         )
 
 
+        # ==============================
+        # DELETE UPLOADED FILE
+        # ==============================
+
         if os.path.exists(
             upload_path
         ):
@@ -286,6 +347,17 @@ async def upload_image(file: UploadFile = File(...)):
             os.remove(
                 upload_path
             )
+
+
+        # ==============================
+        # CLEAN MEMORY
+        # ==============================
+
+        del results
+
+        del model
+
+        gc.collect()
 
 
         return JSONResponse(
