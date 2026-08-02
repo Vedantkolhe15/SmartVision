@@ -3,13 +3,33 @@ import gc
 import shutil
 import uuid
 
-# Limit CPU threads to reduce memory usage on Render
+
+# ==============================
+# MODEL PATH
+# ==============================
+
+BASE_DIR = os.path.dirname(
+    os.path.abspath(__file__)
+)
+
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "yolov8n.pt"
+)
+
+
+# ==============================
+# LIMIT CPU THREADS
+# ==============================
+
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
+
 
 import torch
 
 torch.set_num_threads(1)
+
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,11 +67,25 @@ app.add_middleware(
 # FOLDERS
 # ==============================
 
-UPLOAD_FOLDER = "uploads"
-RESULT_FOLDER = "results"
+UPLOAD_FOLDER = os.path.join(
+    BASE_DIR,
+    "uploads"
+)
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULT_FOLDER, exist_ok=True)
+RESULT_FOLDER = os.path.join(
+    BASE_DIR,
+    "results"
+)
+
+os.makedirs(
+    UPLOAD_FOLDER,
+    exist_ok=True
+)
+
+os.makedirs(
+    RESULT_FOLDER,
+    exist_ok=True
+)
 
 
 # ==============================
@@ -60,7 +94,9 @@ os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 app.mount(
     "/results",
-    StaticFiles(directory=RESULT_FOLDER),
+    StaticFiles(
+        directory=RESULT_FOLDER
+    ),
     name="results"
 )
 
@@ -73,7 +109,8 @@ app.mount(
 def home():
 
     return {
-        "message": "SmartVision AI Backend is Running"
+        "message":
+        "SmartVision AI Backend is Running"
     }
 
 
@@ -85,7 +122,8 @@ def home():
 def health():
 
     return {
-        "status": "healthy"
+        "status":
+        "healthy"
     }
 
 
@@ -101,7 +139,14 @@ async def upload_image(
     model = None
     results = None
 
-    unique_id = uuid.uuid4().hex[:8]
+    unique_id = (
+        uuid.uuid4().hex[:8]
+    )
+
+
+    # ==============================
+    # FILE EXTENSION
+    # ==============================
 
     extension = os.path.splitext(
         file.filename
@@ -133,7 +178,14 @@ async def upload_image(
         )
 
 
-    original_filename = file.filename
+    original_filename = (
+        file.filename
+    )
+
+
+    # ==============================
+    # FILE NAMES
+    # ==============================
 
     safe_filename = (
         f"{unique_id}{extension}"
@@ -143,6 +195,7 @@ async def upload_image(
         UPLOAD_FOLDER,
         safe_filename
     )
+
 
     result_filename = (
         f"result_{safe_filename}"
@@ -176,11 +229,12 @@ async def upload_image(
         # ==============================
 
         print(
-            "Loading YOLO model..."
+            "Loading YOLO model from:",
+            MODEL_PATH
         )
 
         model = YOLO(
-            "yolov8n.pt"
+            MODEL_PATH
         )
 
         print(
@@ -226,14 +280,19 @@ async def upload_image(
 
         for result in results:
 
-            # Save result image
+
+            # ==============================
+            # SAVE RESULT IMAGE
+            # ==============================
 
             result.save(
                 filename=result_path
             )
 
 
-            # Process detected objects
+            # ==============================
+            # PROCESS DETECTED OBJECTS
+            # ==============================
 
             for box in result.boxes:
 
@@ -245,9 +304,11 @@ async def upload_image(
                     box.conf[0]
                 )
 
-                class_name = model.names[
-                    class_id
-                ]
+                class_name = (
+                    model.names[
+                        class_id
+                    ]
+                )
 
 
                 detections.append({
@@ -263,6 +324,10 @@ async def upload_image(
 
                 })
 
+
+                # ==============================
+                # COUNT OBJECTS
+                # ==============================
 
                 object_counts[
                     class_name
@@ -330,6 +395,11 @@ async def upload_image(
 
     except Exception as e:
 
+
+        # ==============================
+        # PRINT ERROR
+        # ==============================
+
         print(
             "ERROR:",
             str(e)
@@ -359,6 +429,10 @@ async def upload_image(
 
         gc.collect()
 
+
+        # ==============================
+        # RETURN ERROR
+        # ==============================
 
         return JSONResponse(
 
