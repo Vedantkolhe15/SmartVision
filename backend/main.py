@@ -147,7 +147,7 @@ def health():
 async def upload_image(
     file: UploadFile = File(...)
 ):
-
+    print("===== UPLOAD REQUEST RECEIVED =====")
     unique_id = uuid.uuid4().hex[:8]
 
     # =====================================================
@@ -225,12 +225,16 @@ async def upload_image(
                 buffer
             )
 
-        # =================================================
+         # =================================================
         # RUN YOLO
         # =================================================
 
         print(
             "Starting YOLO inference..."
+        )
+
+        print(
+            "===== STARTING YOLO INFERENCE ====="
         )
 
         results = model(
@@ -246,6 +250,9 @@ async def upload_image(
             "YOLO inference completed"
         )
 
+        print(
+            "===== YOLO INFERENCE COMPLETED ====="
+        )
         # =================================================
         # RESPONSE DATA
         # =================================================
@@ -333,7 +340,7 @@ async def upload_image(
         # =================================================
         # SUCCESS
         # =================================================
-
+        print("===== SUCCESS RESPONSE =====")
         return JSONResponse(
 
             content={
