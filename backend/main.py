@@ -1,16 +1,17 @@
 import os
-import gc
-import shutil
-import uuid
 
 # =========================================================
-# MEMORY OPTIMIZATION
+# MEMORY OPTIMIZATION - MUST BE BEFORE TORCH IMPORT
 # =========================================================
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+import gc
+import shutil
+import uuid
 
 # =========================================================
 # BASE DIRECTORY
@@ -26,17 +27,34 @@ MODEL_PATH = os.path.join(
 )
 
 # =========================================================
-# IMPORTS
+# IMPORT TORCH
 # =========================================================
 
 import torch
 
 torch.set_num_threads(1)
 
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+# =========================================================
+# FASTAPI IMPORTS
+# =========================================================
+
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File
+)
+
+from fastapi.middleware.cors import (
+    CORSMiddleware
+)
+
+from fastapi.responses import (
+    JSONResponse
+)
+
+from fastapi.staticfiles import (
+    StaticFiles
+)
 
 from ultralytics import YOLO
 
@@ -59,7 +77,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
 # =========================================================
@@ -87,7 +105,7 @@ os.makedirs(
 )
 
 # =========================================================
-# STATIC RESULTS
+# STATIC RESULT IMAGES
 # =========================================================
 
 app.mount(
@@ -99,11 +117,15 @@ app.mount(
 )
 
 # =========================================================
-# LOAD MODEL ONCE
+# LOAD YOLO MODEL ONCE
 # =========================================================
 
 print(
-    "Loading YOLO model from:",
+    "===== LOADING YOLO MODEL ====="
+)
+
+print(
+    "Model path:",
     MODEL_PATH
 )
 
@@ -112,7 +134,7 @@ model = YOLO(
 )
 
 print(
-    "YOLO model loaded successfully"
+    "===== YOLO MODEL LOADED SUCCESSFULLY ====="
 )
 
 # =========================================================
@@ -128,7 +150,7 @@ def home():
     }
 
 # =========================================================
-# HEALTH
+# HEALTH CHECK
 # =========================================================
 
 @app.get("/health")
@@ -147,8 +169,14 @@ def health():
 async def upload_image(
     file: UploadFile = File(...)
 ):
-    print("===== UPLOAD REQUEST RECEIVED =====")
-    unique_id = uuid.uuid4().hex[:8]
+
+    print(
+        "===== UPLOAD REQUEST RECEIVED ====="
+    )
+
+    unique_id = (
+        uuid.uuid4().hex[:8]
+    )
 
     # =====================================================
     # VALIDATE FILE
@@ -157,11 +185,14 @@ async def upload_image(
     if not file.filename:
 
         return JSONResponse(
+
             status_code=400,
+
             content={
                 "error":
                 "No file selected."
             }
+
         )
 
     extension = os.path.splitext(
@@ -169,90 +200,135 @@ async def upload_image(
     )[1].lower()
 
     allowed_extensions = [
+
         ".jpg",
         ".jpeg",
         ".png",
         ".webp"
+
     ]
 
     if extension not in allowed_extensions:
 
         return JSONResponse(
+
             status_code=400,
+
             content={
+
                 "error":
                 "Only JPG, JPEG, PNG and WEBP images are allowed."
+
             }
+
         )
 
     # =====================================================
     # FILE PATHS
     # =====================================================
 
-    original_filename = file.filename
+    original_filename = (
+        file.filename
+    )
 
     safe_filename = (
-        f"{unique_id}{extension}"
+
+        f"{unique_id}"
+        f"{extension}"
+
     )
 
     upload_path = os.path.join(
+
         UPLOAD_FOLDER,
+
         safe_filename
+
     )
 
     result_filename = (
-        f"result_{safe_filename}"
+
+        f"result_"
+        f"{safe_filename}"
+
     )
 
     result_path = os.path.join(
+
         RESULT_FOLDER,
+
         result_filename
+
     )
 
     try:
 
         # =================================================
-        # SAVE UPLOADED IMAGE
-        # =================================================
-
-        with open(
-            upload_path,
-            "wb"
-        ) as buffer:
-
-            shutil.copyfileobj(
-                file.file,
-                buffer
-            )
-
-         # =================================================
-        # RUN YOLO
+        # SAVE IMAGE
         # =================================================
 
         print(
-            "Starting YOLO inference..."
+            "Saving uploaded image..."
         )
+
+        with open(
+
+            upload_path,
+
+            "wb"
+
+        ) as buffer:
+
+            shutil.copyfileobj(
+
+                file.file,
+
+                buffer
+
+            )
+
+        # =================================================
+        # CLOSE UPLOAD FILE
+        # =================================================
+
+        await file.close()
+
+        print(
+            "Uploaded image saved."
+        )
+
+        # =================================================
+        # YOLO INFERENCE
+        # =================================================
 
         print(
             "===== STARTING YOLO INFERENCE ====="
         )
 
-        results = model(
-            upload_path,
+        # IMPORTANT:
+        # stream=True prevents storing unnecessary
+        # prediction results in a large list.
+
+        results = model.predict(
+
+            source=upload_path,
+
+            save=False,
+
+            stream=True,
+
+            verbose=False,
+
             imgsz=224,
+
             device="cpu",
+
             conf=0.35,
-            max_det=3,
-            verbose=False
+
+            max_det=3
+
         )
 
-        print(
-            "YOLO inference completed"
-        )
-
-        print(
-            "===== YOLO INFERENCE COMPLETED ====="
-        )
         # =================================================
         # RESPONSE DATA
         # =================================================
@@ -262,21 +338,27 @@ async def upload_image(
         object_counts = {}
 
         # =================================================
-        # PROCESS RESULT
+        # PROCESS STREAMING RESULTS
         # =================================================
 
         for result in results:
+
+            print(
+                "Processing YOLO result..."
+            )
 
             # =============================================
             # SAVE RESULT IMAGE
             # =============================================
 
             result.save(
+
                 filename=result_path
+
             )
 
             # =============================================
-            # PROCESS BOXES
+            # PROCESS DETECTIONS
             # =============================================
 
             if result.boxes is not None:
@@ -284,53 +366,87 @@ async def upload_image(
                 for box in result.boxes:
 
                     class_id = int(
+
                         box.cls[0]
+
                     )
 
                     confidence = float(
+
                         box.conf[0]
+
                     )
 
                     class_name = (
+
                         model.names[
+
                             class_id
+
                         ]
+
                     )
 
                     detections.append({
 
                         "object":
+
                         class_name,
 
                         "confidence":
+
                         round(
+
                             confidence * 100,
+
                             2
+
                         )
 
                     })
 
                     object_counts[
+
                         class_name
+
                     ] = object_counts.get(
+
                         class_name,
+
                         0
+
                     ) + 1
+
+            # =============================================
+            # CLEAN CURRENT RESULT
+            # =============================================
+
+            del result
+
+            gc.collect()
+
+        print(
+            "===== YOLO INFERENCE COMPLETED ====="
+        )
 
         # =================================================
         # DELETE UPLOADED IMAGE
         # =================================================
 
         if os.path.exists(
+
             upload_path
+
         ):
 
             os.remove(
+
                 upload_path
+
             )
 
         # =================================================
-        # MEMORY CLEANUP
+        # CLEAN MEMORY
         # =================================================
 
         del results
@@ -340,25 +456,35 @@ async def upload_image(
         # =================================================
         # SUCCESS
         # =================================================
-        print("===== SUCCESS RESPONSE =====")
+
+        print(
+            "===== SUCCESS RESPONSE ====="
+        )
+
         return JSONResponse(
 
             content={
 
                 "message":
+
                 "Image analyzed successfully",
 
                 "filename":
+
                 original_filename,
 
                 "detections":
+
                 detections,
 
                 "object_counts":
+
                 object_counts,
 
                 "result_image":
+
                 "/results/"
+
                 + result_filename
 
             }
@@ -367,36 +493,39 @@ async def upload_image(
 
     # =====================================================
     # ERROR HANDLING
-    # =================================================
+    # =====================================================
 
     except Exception as e:
 
         print(
-            "ERROR:",
+
+            "===== ERROR =====",
+
             str(e)
+
         )
 
         # =================================================
-        # DELETE UPLOAD
+        # DELETE UPLOAD FILE
         # =================================================
 
         if os.path.exists(
+
             upload_path
+
         ):
 
             os.remove(
+
                 upload_path
+
             )
 
         # =================================================
-        # CLEAN MEMORY
+        # MEMORY CLEANUP
         # =================================================
 
         gc.collect()
-
-        # =================================================
-        # ERROR RESPONSE
-        # =================================================
 
         return JSONResponse(
 
@@ -405,9 +534,11 @@ async def upload_image(
             content={
 
                 "error":
+
                 "Image analysis failed",
 
                 "details":
+
                 str(e)
 
             }
