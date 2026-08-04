@@ -1,16 +1,119 @@
-# React + Vite
+\# 🚀 SmartVision AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
-Currently, two official plugins are available:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+\### Intelligent AI-Powered Image Recognition \& Object Detection System
 
-## React Compiler
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## Expanding the Oxlint configuration
+SmartVision AI is a modern web-based Artificial Intelligence and Computer Vision application that can automatically analyze uploaded images and detect objects using a YOLO-based deep learning model.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+
+
+The system provides AI-generated detection results, object counts, confidence scores, and a visualized result image with detected objects.
+
+
+
+\---
+
+
+
+\## 🌟 Features
+
+
+
+\- 🖼️ Upload images from your device
+
+\- 📤 Drag and drop image upload
+
+\- 🤖 AI-powered object detection
+
+\- 🎯 Detect multiple objects in a single image
+
+\- 📊 Display total detected objects
+
+\- 🔍 Display detection events
+
+\- 🧠 YOLO-based Computer Vision
+
+\- 📈 Confidence score visualization
+
+\- 👁️ Object-wise detection summary
+
+\- 🖼️ AI-generated detection result image
+
+\- ⚡ Fast API-based backend
+
+\- 🌐 Live cloud deployment
+
+\- 📱 Responsive interface for desktop and mobile devices
+
+\- 🔄 New analysis / reset functionality
+
+\- ⚠️ Error handling and loading states
+
+
+
+\---
+
+
+
+\## 🧠 How SmartVision AI Works
+
+
+
+The system follows a simple AI-powered workflow:
+
+
+
+```text
+
+User Uploads Image
+
+&#x20;       ↓
+
+React Frontend
+
+&#x20;       ↓
+
+FastAPI Backend
+
+&#x20;       ↓
+
+YOLO Object Detection Model
+
+&#x20;       ↓
+
+AI Analysis
+
+&#x20;       ↓
+
+Object Detection Results
+
+&#x20;       ↓
+
+Confidence Scores + Object Counts
+
+&#x20;       ↓
+
+Result Image
+
+&#x20;       ↓
+
+Displayed in Web Application
+
+---
+
+## 🌐 Live Application
+
+### 🖥️ Frontend
+
+https://smart-vision-zeta.vercel.app/
+
+### ⚙️ Backend API
+
+https://smartvision-backend-1.onrender.com
+
+### 📚 API Documentation
+
+https://smartvision-backend-1.onrender.com/docs
