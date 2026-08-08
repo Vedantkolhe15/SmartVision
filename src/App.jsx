@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const BACKEND_URL = "https://smartvision-backend-1.onrender.com";
 
@@ -9,8 +9,41 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [history, setHistory] = useState([]);
 
   const fileInputRef = useRef(null);
+  const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.readAsDataURL(file);
+
+    reader.onload = () => resolve(reader.result);
+
+    reader.onerror = (error) => reject(error);
+  });
+};
+
+  // ================= LOAD HISTORY =================
+
+  useEffect(() => {
+    try {
+      const savedHistory = localStorage.getItem("smartvision_history");
+
+      if (savedHistory) {
+        const parsedHistory = JSON.parse(savedHistory);
+
+        if (Array.isArray(parsedHistory)) {
+          setHistory(parsedHistory);
+        }
+      }
+    } catch (err) {
+      console.error("Unable to load history:", err);
+      localStorage.removeItem("smartvision_history");
+    }
+  }, []);
+
+  // ================= FILE SELECTION =================
 
   const handleSelectedFile = (file) => {
     if (!file) return;
@@ -20,8 +53,14 @@ function App() {
       return;
     }
 
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
+    const imagePreview = URL.createObjectURL(file);
+
     setSelectedFile(file);
-    setPreview(URL.createObjectURL(file));
+    setPreview(imagePreview);
     setResult(null);
     setError("");
   };
@@ -30,13 +69,18 @@ function App() {
     handleSelectedFile(event.target.files[0]);
   };
 
+  // ================= DRAG & DROP =================
+
   const handleDrop = (event) => {
     event.preventDefault();
     setDragActive(false);
 
     const file = event.dataTransfer.files[0];
+
     handleSelectedFile(file);
   };
+
+  // ================= ANALYZE IMAGE =================
 
   const analyzeImage = async () => {
     if (!selectedFile) {
@@ -49,7 +93,9 @@ function App() {
     setResult(null);
 
     try {
+      const previewBase64 = await fileToBase64(selectedFile);
       const formData = new FormData();
+
       formData.append("file", selectedFile);
 
       const response = await fetch(
@@ -62,6 +108,7 @@ function App() {
 
       if (!response.ok) {
         const errorText = await response.text();
+
         console.error(errorText);
 
         throw new Error(
@@ -71,7 +118,32 @@ function App() {
 
       const data = await response.json();
 
+      // Show result
       setResult(data);
+
+      // Create history item
+      const historyItem = {
+        id: Date.now(),
+        filename: selectedFile.name,
+        date: new Date().toLocaleString(),
+        message: data.message || "Analysis completed successfully.",
+        detections: data.detections || [],
+        object_counts: data.object_counts || {},
+        result_image: data.result_image || "",
+        preview_image: previewBase64,
+      };
+
+      const updatedHistory = [
+        historyItem,
+        ...history,
+      ].slice(0, 10);
+
+      setHistory(updatedHistory);
+
+      localStorage.setItem(
+        "smartvision_history",
+        JSON.stringify(updatedHistory)
+      );
     } catch (err) {
       console.error(err);
 
@@ -83,7 +155,13 @@ function App() {
     }
   };
 
+  // ================= RESET =================
+
   const resetAnalysis = () => {
+    if (preview) {
+      URL.revokeObjectURL(preview);
+    }
+
     setSelectedFile(null);
     setPreview(null);
     setResult(null);
@@ -94,6 +172,8 @@ function App() {
     }
   };
 
+  // ================= RESULT STATISTICS =================
+
   const totalObjects = result?.object_counts
     ? Object.values(result.object_counts).reduce(
         (sum, count) => sum + count,
@@ -101,31 +181,116 @@ function App() {
       )
     : 0;
 
+  // ================= DASHBOARD STATISTICS =================
+
+  const totalAnalyses = history.length;
+
+  const totalHistoryObjects = history.reduce(
+    (total, item) => {
+      return (
+        total +
+        Object.values(
+          item.object_counts || {}
+        ).reduce(
+          (sum, count) => sum + count,
+          0
+        )
+      );
+    },
+    0
+  );
+
+  const objectStatistics = history.reduce(
+    (stats, item) => {
+      Object.entries(
+        item.object_counts || {}
+      ).forEach(
+        ([objectName, count]) => {
+          stats[objectName] =
+            (stats[objectName] || 0) + count;
+        }
+      );
+
+      return stats;
+    },
+    {}
+  );
+
+  const mostDetectedObject =
+    Object.entries(objectStatistics).sort(
+      (a, b) => b[1] - a[1]
+    )[0]?.[0] || "None";
+
+  // ================= OPEN HISTORY RESULT =================
+
+  const openHistoryItem = (item) => {
+    setResult({
+      message:
+        item.message ||
+        "Previous analysis result",
+      detections: item.detections || [],
+      object_counts: item.object_counts || {},
+      result_image: item.result_image || "",
+    });
+
+    setError("");
+
+    setTimeout(() => {
+      
+    }, 100);
+  };
+
+  // ================= CLEAR HISTORY =================
+
+  const clearHistory = () => {
+    setHistory([]);
+
+    localStorage.removeItem(
+      "smartvision_history"
+    );
+  };
+
   return (
     <div className="app">
 
       {/* ================= HEADER ================= */}
 
       <header className="navbar">
+
         <div className="brand">
-          <div className="brand-icon">SV</div>
+
+          <div className="brand-icon">
+            SV
+          </div>
 
           <div>
-            <h1>SmartVision AI</h1>
-            <span>Intelligent Image Recognition</span>
+            <h1>
+              SmartVision AI
+            </h1>
+
+            <span>
+              Intelligent Image Recognition
+            </span>
           </div>
+
         </div>
 
         <div className="status">
+
           <span className="status-dot"></span>
+
           AI System Ready
+
         </div>
+
       </header>
 
 
-      {/* ================= HERO ================= */}
+      {/* ================= MAIN ================= */}
 
       <main className="container">
+
+        {/* ================= HERO ================= */}
 
         <section className="hero">
 
@@ -151,13 +316,17 @@ function App() {
 
         <section
           className={`upload-card ${
-            dragActive ? "drag-active" : ""
+            dragActive
+              ? "drag-active"
+              : ""
           }`}
           onDragOver={(event) => {
             event.preventDefault();
             setDragActive(true);
           }}
-          onDragLeave={() => setDragActive(false)}
+          onDragLeave={() =>
+            setDragActive(false)
+          }
           onDrop={handleDrop}
         >
 
@@ -182,7 +351,7 @@ function App() {
               <button
                 className="select-button"
                 onClick={() =>
-                  fileInputRef.current.click()
+                  fileInputRef.current?.click()
                 }
               >
                 Choose Image
@@ -197,7 +366,8 @@ function App() {
               />
 
               <small>
-                Supported formats: JPG, JPEG, PNG, WEBP
+                Supported formats:
+                JPG, JPEG, PNG, WEBP
               </small>
 
             </div>
@@ -214,6 +384,7 @@ function App() {
               <div className="preview-header">
 
                 <div>
+
                   <h3>
                     Selected Image
                   </h3>
@@ -221,6 +392,7 @@ function App() {
                   <p>
                     {selectedFile?.name}
                   </p>
+
                 </div>
 
                 <button
@@ -269,8 +441,15 @@ function App() {
         {error && (
 
           <div className="error-box">
-            <strong>⚠️ Analysis Error</strong>
-            <p>{error}</p>
+
+            <strong>
+              ⚠️ Analysis Error
+            </strong>
+
+            <p>
+              {error}
+            </p>
+
           </div>
 
         )}
@@ -303,15 +482,365 @@ function App() {
         )}
 
 
+        {/* ================= DASHBOARD ================= */}
+
+        {history.length > 0 && (
+
+          <section className="dashboard-section">
+
+            <div className="dashboard-header">
+
+              <div>
+
+                <div className="dashboard-badge">
+                  📊 AI Analytics
+                </div>
+
+                <h2>
+                  SmartVision Dashboard
+                </h2>
+
+                <p>
+                  Overview of your AI-powered image
+                  analysis activity
+                </p>
+
+              </div>
+
+            </div>
+
+
+            {/* DASHBOARD STATS */}
+
+            <div className="dashboard-stats">
+
+              <div className="dashboard-stat-card">
+
+                <div className="dashboard-stat-icon">
+                  🖼️
+                </div>
+
+                <div>
+
+                  <span>
+                    Total Analyses
+                  </span>
+
+                  <strong>
+                    {totalAnalyses}
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div className="dashboard-stat-card">
+
+                <div className="dashboard-stat-icon">
+                  🎯
+                </div>
+
+                <div>
+
+                  <span>
+                    Total Objects
+                  </span>
+
+                  <strong>
+                    {totalHistoryObjects}
+                  </strong>
+
+                </div>
+
+              </div>
+
+
+              <div className="dashboard-stat-card">
+
+                <div className="dashboard-stat-icon">
+                  🏆
+                </div>
+
+                <div>
+
+                  <span>
+                    Most Detected
+                  </span>
+
+                  <strong className="capitalize">
+                    {mostDetectedObject}
+                  </strong>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            {/* OBJECT STATISTICS */}
+
+            <div className="statistics-card">
+
+              <div className="section-title">
+
+                <div>
+
+                  <h3>
+                    Object Detection Statistics
+                  </h3>
+
+                  <p>
+                    Most frequently detected objects
+                  </p>
+
+                </div>
+
+                <span>
+                  AI Insights
+                </span>
+
+              </div>
+
+
+              <div className="statistics-list">
+
+                {Object.entries(objectStatistics)
+                  .sort(
+                    (a, b) =>
+                      b[1] - a[1]
+                  )
+                  .map(
+                    ([objectName, count]) => {
+
+                      const maxCount =
+                        Math.max(
+                          ...Object.values(
+                            objectStatistics
+                          )
+                        );
+
+                      const percentage =
+                        maxCount > 0
+                          ? (count / maxCount) * 100
+                          : 0;
+
+                      return (
+
+                        <div
+                          className="statistics-item"
+                          key={objectName}
+                        >
+
+                          <div className="statistics-info">
+
+                            <strong>
+                              {objectName}
+                            </strong>
+
+                            <span>
+                              {count} detected
+                            </span>
+
+                          </div>
+
+                          <div className="statistics-bar">
+
+                            <div
+                              style={{
+                                width:
+                                  `${percentage}%`,
+                              }}
+                            ></div>
+
+                          </div>
+
+                        </div>
+
+                      );
+                    }
+                  )}
+
+              </div>
+
+            </div>
+
+          </section>
+
+        )}
+
+
+        {/* ================= ANALYSIS HISTORY ================= */}
+
+        {history.length > 0 && (
+
+          <section className="history-section">
+
+            <div className="history-header">
+
+              <div>
+
+                <div className="history-badge">
+                  🕘 Recent Activity
+                </div>
+
+                <h2>
+                  Analysis History
+                </h2>
+
+                <p>
+                  Your recent AI image analysis results
+                </p>
+
+              </div>
+
+              <button
+                className="clear-history-button"
+                onClick={clearHistory}
+              >
+                🗑️ Clear History
+              </button>
+
+            </div>
+
+
+            <div className="history-grid">
+
+              {history.map((item) => (
+
+                <div
+                  className="history-card"
+                  key={item.id}
+                  onClick={() =>
+                    openHistoryItem(item)
+                  }
+                >
+
+                  <div className="history-card-top">
+
+  {item.preview_image ? (
+    <img
+      src={item.preview_image}
+      alt={item.filename}
+      className="history-thumbnail"
+    />
+  ) : (
+    <div className="history-file-icon">
+      🖼️
+    </div>
+  )}
+
+  <div className="history-file-info">
+
+                      <strong>
+                        {item.filename}
+                      </strong>
+
+                      <span>
+                        {item.date}
+                      </span>
+
+                    </div>
+
+                  </div>
+
+
+                  <div className="history-summary">
+
+                    <div>
+
+                      <span>
+                        Objects
+                      </span>
+
+                      <strong>
+                        {Object.values(
+                          item.object_counts || {}
+                        ).reduce(
+                          (sum, count) =>
+                            sum + count,
+                          0
+                        )}
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <span>
+                        Types
+                      </span>
+
+                      <strong>
+                        {Object.keys(
+                          item.object_counts || {}
+                        ).length}
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <span>
+                        AI
+                      </span>
+
+                      <strong>
+                        YOLO
+                      </strong>
+
+                    </div>
+
+                  </div>
+
+
+                  <div className="history-objects">
+
+                    {Object.entries(
+                      item.object_counts || {}
+                    ).map(
+                      ([objectName, count]) => (
+
+                        <span
+                          key={objectName}
+                          className="history-object-tag"
+                        >
+                          {objectName} × {count}
+                        </span>
+
+                      )
+                    )}
+
+                  </div>
+
+                  <div className="history-click-hint">
+                    Click to view result →
+                  </div>
+
+                </div>
+
+              ))}
+
+            </div>
+
+          </section>
+
+        )}
+
+
         {/* ================= RESULT ================= */}
 
-        {result && !loading && (
+        {false && (
 
           <section className="results">
 
             <div className="result-header">
 
               <div>
+
                 <div className="success-badge">
                   ✓ Analysis Complete
                 </div>
@@ -323,6 +852,7 @@ function App() {
                 <p>
                   {result.message}
                 </p>
+
               </div>
 
               <button
@@ -335,7 +865,7 @@ function App() {
             </div>
 
 
-            {/* ================= STAT CARDS ================= */}
+            {/* STAT CARDS */}
 
             <div className="stats-grid">
 
@@ -346,10 +876,15 @@ function App() {
                 </div>
 
                 <div>
-                  <span>Objects Detected</span>
+
+                  <span>
+                    Objects Detected
+                  </span>
+
                   <strong>
                     {totalObjects}
                   </strong>
+
                 </div>
 
               </div>
@@ -362,10 +897,15 @@ function App() {
                 </div>
 
                 <div>
-                  <span>Detection Events</span>
+
+                  <span>
+                    Detection Events
+                  </span>
+
                   <strong>
                     {result.detections?.length || 0}
                   </strong>
+
                 </div>
 
               </div>
@@ -378,10 +918,15 @@ function App() {
                 </div>
 
                 <div>
-                  <span>AI Engine</span>
+
+                  <span>
+                    AI Engine
+                  </span>
+
                   <strong>
                     YOLO
                   </strong>
+
                 </div>
 
               </div>
@@ -389,13 +934,14 @@ function App() {
             </div>
 
 
-            {/* ================= DETECTED OBJECTS ================= */}
+            {/* DETECTED OBJECTS */}
 
             {result.object_counts && (
 
               <div className="objects-card">
 
                 <div className="section-title">
+
                   <h3>
                     Detected Objects
                   </h3>
@@ -405,6 +951,7 @@ function App() {
                       result.object_counts
                     ).length} Types
                   </span>
+
                 </div>
 
 
@@ -425,6 +972,7 @@ function App() {
                         </div>
 
                         <div>
+
                           <strong>
                             {objectName}
                           </strong>
@@ -432,6 +980,7 @@ function App() {
                           <span>
                             {count} detected
                           </span>
+
                         </div>
 
                       </div>
@@ -446,7 +995,7 @@ function App() {
             )}
 
 
-            {/* ================= DETECTION DETAILS ================= */}
+            {/* DETECTION DETAILS */}
 
             {result.detections &&
               result.detections.length > 0 && (
@@ -492,7 +1041,8 @@ function App() {
 
                             <div
                               style={{
-                                width: `${item.confidence}%`,
+                                width:
+                                  `${item.confidence}%`,
                               }}
                             ></div>
 
@@ -510,22 +1060,25 @@ function App() {
               )}
 
 
-            {/* ================= RESULT IMAGE ================= */}
+            {/* RESULT IMAGE */}
 
-            {result.result_image && (
+            {false && (
 
               <div className="result-image-card">
 
                 <div className="section-title">
 
                   <div>
+
                     <h3>
                       AI Detection Visualization
                     </h3>
 
                     <p>
-                      Objects identified by SmartVision AI
+                      Objects identified by
+                      SmartVision AI
                     </p>
+
                   </div>
 
                 </div>
@@ -562,7 +1115,8 @@ function App() {
         </p>
 
         <span>
-          Powered by Artificial Intelligence & Computer Vision
+          Powered by Artificial Intelligence &
+          Computer Vision
         </span>
 
       </footer>
@@ -603,7 +1157,7 @@ function App() {
             #f4f7fb;
         }
 
-        /* NAVBAR */
+        /* ================= NAVBAR ================= */
 
         .navbar {
           height: 78px;
@@ -670,7 +1224,7 @@ function App() {
         }
 
 
-        /* MAIN */
+        /* ================= MAIN ================= */
 
         .container {
           max-width: 1100px;
@@ -679,7 +1233,7 @@ function App() {
         }
 
 
-        /* HERO */
+        /* ================= HERO ================= */
 
         .hero {
           text-align: center;
@@ -717,7 +1271,7 @@ function App() {
         }
 
 
-        /* UPLOAD */
+        /* ================= UPLOAD ================= */
 
         .upload-card {
           margin-top: 45px;
@@ -791,7 +1345,7 @@ function App() {
         }
 
 
-        /* PREVIEW */
+        /* ================= PREVIEW ================= */
 
         .preview-section {
           width: 100%;
@@ -851,7 +1405,8 @@ function App() {
           border-top-color: white;
           border-radius: 50%;
           margin-right: 8px;
-          animation: spin 0.8s linear infinite;
+          animation:
+            spin 0.8s linear infinite;
         }
 
         @keyframes spin {
@@ -861,7 +1416,7 @@ function App() {
         }
 
 
-        /* ERROR */
+        /* ================= ERROR ================= */
 
         .error-box {
           margin-top: 25px;
@@ -877,7 +1432,7 @@ function App() {
         }
 
 
-        /* LOADING */
+        /* ================= LOADING ================= */
 
         .loading-card {
           margin-top: 30px;
@@ -892,7 +1447,8 @@ function App() {
 
         .loading-animation {
           font-size: 45px;
-          animation: pulse 1.2s infinite;
+          animation:
+            pulse 1.2s infinite;
         }
 
         @keyframes pulse {
@@ -938,7 +1494,321 @@ function App() {
         }
 
 
-        /* RESULTS */
+        /* ================= DASHBOARD ================= */
+
+        .dashboard-section {
+          margin-top: 55px;
+        }
+
+        .dashboard-header {
+          margin-bottom: 25px;
+        }
+
+        .dashboard-badge {
+          display: inline-block;
+          background: #eef3ff;
+          color: #2563eb;
+          padding: 7px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .dashboard-header h2 {
+          margin: 12px 0 5px;
+          font-size: 30px;
+        }
+
+        .dashboard-header p {
+          color: #7b8494;
+          margin: 0;
+        }
+
+        .dashboard-stats {
+          display: grid;
+          grid-template-columns:
+            repeat(3, 1fr);
+          gap: 18px;
+        }
+
+        .dashboard-stat-card {
+          background: white;
+          padding: 22px;
+          border-radius: 18px;
+          display: flex;
+          align-items: center;
+          gap: 15px;
+          border: 1px solid #e8edf5;
+          box-shadow:
+            0 10px 30px
+            rgba(15, 23, 42, 0.05);
+          transition: 0.25s;
+        }
+
+        .dashboard-stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow:
+            0 15px 35px
+            rgba(37, 99, 235, 0.12);
+        }
+
+        .dashboard-stat-icon {
+          width: 50px;
+          height: 50px;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: #eef3ff;
+          font-size: 23px;
+        }
+
+        .dashboard-stat-card span {
+          display: block;
+          color: #8a93a3;
+          font-size: 12px;
+        }
+
+        .dashboard-stat-card strong {
+          display: block;
+          margin-top: 6px;
+          font-size: 22px;
+        }
+
+        .capitalize {
+          text-transform: capitalize;
+        }
+
+        .statistics-card {
+          background: white;
+          margin-top: 22px;
+          padding: 25px;
+          border-radius: 20px;
+          border: 1px solid #e8edf5;
+          box-shadow:
+            0 10px 30px
+            rgba(15, 23, 42, 0.05);
+        }
+
+        .statistics-list {
+          margin-top: 25px;
+        }
+
+        .statistics-item {
+          margin-bottom: 20px;
+        }
+
+        .statistics-info {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 8px;
+        }
+
+        .statistics-info strong {
+          text-transform: capitalize;
+        }
+
+        .statistics-info span {
+          color: #8a93a3;
+          font-size: 12px;
+        }
+
+        .statistics-bar {
+          height: 9px;
+          background: #e9edf4;
+          border-radius: 10px;
+          overflow: hidden;
+        }
+
+        .statistics-bar div {
+          height: 100%;
+          background:
+            linear-gradient(
+              90deg,
+              #2563eb,
+              #7c3aed
+            );
+          border-radius: 10px;
+          transition:
+            width 0.5s ease;
+        }
+
+
+        /* ================= HISTORY ================= */
+
+        .history-section {
+          margin-top: 55px;
+        }
+
+        .history-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 25px;
+        }
+
+        .history-badge {
+          display: inline-block;
+          background: #eef3ff;
+          color: #2563eb;
+          padding: 7px 12px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .history-header h2 {
+          margin: 12px 0 5px;
+          font-size: 30px;
+        }
+
+        .history-header p {
+          color: #7b8494;
+          margin: 0;
+        }
+
+        .clear-history-button {
+          border: none;
+          background: #fff1f2;
+          color: #dc2626;
+          padding: 11px 16px;
+          border-radius: 10px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: 0.2s;
+        }
+
+        .clear-history-button:hover {
+          background: #ffe4e6;
+          transform: translateY(-2px);
+        }
+
+        .history-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        width: 100%;
+        max-width: 100%;
+       }
+
+        .history-card {
+          background: white;
+          padding: 20px;
+          border-radius: 18px;
+          border: 1px solid #e8edf5;
+          box-shadow:
+            0 10px 30px
+            rgba(15, 23, 42, 0.05);
+          transition: 0.25s;
+          cursor: pointer;
+        }
+
+        .history-card:hover {
+          transform: translateY(-4px);
+          box-shadow:
+            0 15px 35px
+            rgba(37, 99, 235, 0.12);
+          border-color: #cbd8ff;
+        }
+
+        .history-card-top {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .history-file-icon {
+        .history-thumbnail {
+        width: 100%;
+        height: 180px;
+        object-fit: cover;
+        display: block;
+        border-radius: 14px;
+        margin-bottom: 15px;
+       }
+
+        .history-file-icon {
+        width: 45px;
+        height: 45px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #eef3ff;
+        font-size: 22px;
+       }
+
+        .history-file-info {
+          min-width: 0;
+        }
+
+        .history-file-info strong {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .history-file-info span {
+          display: block;
+          margin-top: 5px;
+          color: #8a93a3;
+          font-size: 12px;
+        }
+
+        .history-summary {
+          display: grid;
+          grid-template-columns:
+            repeat(3, 1fr);
+          gap: 10px;
+          margin-top: 20px;
+          padding-top: 18px;
+          border-top: 1px solid #edf0f5;
+        }
+
+        .history-summary div {
+          text-align: center;
+        }
+
+        .history-summary span {
+          display: block;
+          color: #8a93a3;
+          font-size: 11px;
+        }
+
+        .history-summary strong {
+          display: block;
+          margin-top: 5px;
+          font-size: 15px;
+        }
+
+        .history-objects {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+          margin-top: 18px;
+        }
+
+        .history-object-tag {
+          background: #f1f5ff;
+          color: #315edb;
+          padding: 6px 9px;
+          border-radius: 8px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .history-click-hint {
+          margin-top: 18px;
+          color: #2563eb;
+          font-size: 12px;
+          font-weight: 700;
+          text-align: right;
+        }
+
+
+        /* ================= RESULTS ================= */
 
         .results {
           margin-top: 55px;
@@ -972,7 +1842,7 @@ function App() {
         }
 
 
-        /* STATS */
+        /* ================= RESULT STATS ================= */
 
         .stats-grid {
           display: grid;
@@ -1018,7 +1888,7 @@ function App() {
         }
 
 
-        /* CARDS */
+        /* ================= RESULT CARDS ================= */
 
         .objects-card,
         .details-card,
@@ -1056,7 +1926,7 @@ function App() {
         }
 
 
-        /* OBJECTS */
+        /* ================= OBJECTS ================= */
 
         .object-grid {
           display: grid;
@@ -1090,7 +1960,7 @@ function App() {
         }
 
 
-        /* CONFIDENCE */
+        /* ================= CONFIDENCE ================= */
 
         .detection-list {
           margin-top: 25px;
@@ -1125,7 +1995,7 @@ function App() {
         }
 
 
-        /* RESULT IMAGE */
+        /* ================= RESULT IMAGE ================= */
 
         .result-image-card {
           text-align: center;
@@ -1145,7 +2015,7 @@ function App() {
         }
 
 
-        /* FOOTER */
+        /* ================= FOOTER ================= */
 
         footer {
           text-align: center;
@@ -1161,7 +2031,7 @@ function App() {
         }
 
 
-        /* RESPONSIVE */
+        /* ================= RESPONSIVE ================= */
 
         @media (max-width: 700px) {
 
@@ -1194,10 +2064,34 @@ function App() {
             grid-template-columns: 1fr;
           }
 
+          .dashboard-stats {
+            grid-template-columns: 1fr;
+          }
+
           .preview-header {
             flex-direction: column;
             align-items: flex-start;
             gap: 12px;
+          }
+
+          .history-header {
+            flex-direction: column;
+          }
+
+          .clear-history-button {
+            width: 100%;
+          }
+
+          .history-summary {
+            gap: 5px;
+          }
+
+          .section-title {
+            align-items: flex-start;
+          }
+
+          .result-header .new-analysis {
+            width: 100%;
           }
 
         }
