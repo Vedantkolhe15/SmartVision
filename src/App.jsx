@@ -10,6 +10,9 @@ function App() {
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [history, setHistory] = useState([]);
+ const [darkMode, setDarkMode] = useState(() => {
+  return localStorage.getItem("smartvision_dark_mode") === "true";
+});
 
   const fileInputRef = useRef(null);
   const fileToBase64 = (file) => {
@@ -21,6 +24,64 @@ function App() {
     reader.onload = () => resolve(reader.result);
 
     reader.onerror = (error) => reject(error);
+  });
+};
+const createThumbnail = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const img = new Image();
+
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+
+        const maxWidth = 500;
+        const maxHeight = 500;
+
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round(
+              (height * maxWidth) / width
+            );
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round(
+              (width * maxHeight) / height
+            );
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+
+        ctx.drawImage(
+          img,
+          0,
+          0,
+          width,
+          height
+        );
+
+        resolve(
+          canvas.toDataURL("image/jpeg", 0.7)
+        );
+      };
+
+      img.onerror = reject;
+      img.src = event.target.result;
+    };
+
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
   });
 };
 
@@ -42,6 +103,14 @@ function App() {
       localStorage.removeItem("smartvision_history");
     }
   }, []);
+  // ================= SAVE DARK MODE =================
+
+useEffect(() => {
+  localStorage.setItem(
+    "smartvision_dark_mode",
+    darkMode.toString()
+  );
+}, [darkMode]);
 
   // ================= FILE SELECTION =================
 
@@ -83,77 +152,117 @@ function App() {
   // ================= ANALYZE IMAGE =================
 
   const analyzeImage = async () => {
-    if (!selectedFile) {
-      setError("Please select an image first.");
-      return;
+  if (!selectedFile) {
+    setError("Please select an image first.");
+    return;
+  }
+
+  setLoading(true);
+  setError("");
+  setResult(null);
+
+  try {
+    const previewBase64 = await fileToBase64(selectedFile);
+    const thumbnailBase64 = await createThumbnail(selectedFile);
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    const response = await fetch(
+  `${BACKEND_URL}/upload-image`,
+  {
+    method: "POST",
+    body: formData,
+  }
+);
+
+if (!response.ok) {
+  const errorText = await response.text();
+
+  throw new Error(
+    `Backend returned ${response.status}: ${errorText}`
+  );
+}
+
+    if (!response.ok) {
+      const errorText = await response.text();
+
+      console.error(errorText);
+
+      throw new Error(
+        `Backend returned status ${response.status}`
+      );
     }
 
-    setLoading(true);
-    setError("");
-    setResult(null);
+    const data = await response.json();
 
+    // Show result
+    setResult(data);
+
+    // Create history item
+    const historyItem = {
+      id: Date.now(),
+      filename: selectedFile.name,
+      date: new Date().toLocaleString(),
+      message:
+        data.message ||
+        "Analysis completed successfully.",
+      detections: data.detections || [],
+      object_counts: data.object_counts || {},
+      result_image: data.result_image || "",
+      preview_image: thumbnailBase64,
+    };
+
+    const updatedHistory = [
+      historyItem,
+      ...history,
+    ].slice(0, 10);
+
+    setHistory(updatedHistory);
+
+    // Save history
     try {
-      const previewBase64 = await fileToBase64(selectedFile);
-      const formData = new FormData();
-
-      formData.append("file", selectedFile);
-
-      const response = await fetch(
-        `${BACKEND_URL}/upload-image`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-
-        console.error(errorText);
-
-        throw new Error(
-          `Backend returned status ${response.status}`
-        );
-      }
-
-      const data = await response.json();
-
-      // Show result
-      setResult(data);
-
-      // Create history item
-      const historyItem = {
-        id: Date.now(),
-        filename: selectedFile.name,
-        date: new Date().toLocaleString(),
-        message: data.message || "Analysis completed successfully.",
-        detections: data.detections || [],
-        object_counts: data.object_counts || {},
-        result_image: data.result_image || "",
-        preview_image: previewBase64,
-      };
-
-      const updatedHistory = [
-        historyItem,
-        ...history,
-      ].slice(0, 10);
-
-      setHistory(updatedHistory);
-
       localStorage.setItem(
         "smartvision_history",
         JSON.stringify(updatedHistory)
       );
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        `Unable to analyze image. ${err.message}`
+    } catch (storageError) {
+      console.warn(
+        "History storage quota exceeded:",
+        storageError
       );
-    } finally {
-      setLoading(false);
+
+      // If storage is full, remove preview images
+      const lightweightHistory =
+        updatedHistory.map((item) => ({
+          ...item,
+          preview_image: "",
+        }));
+
+      try {
+        localStorage.setItem(
+          "smartvision_history",
+          JSON.stringify(lightweightHistory)
+        );
+
+        setHistory(lightweightHistory);
+      } catch (finalError) {
+        console.error(
+          "Unable to save history:",
+          finalError
+        );
+      }
     }
-  };
+  } catch (err) {
+    console.error(err);
+
+    setError(
+  `Unable to analyze image. ${err?.message || String(err)}`
+);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // ================= RESET =================
 
@@ -251,7 +360,7 @@ function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${darkMode ? "dark-mode" : ""}`}>
 
       {/* ================= HEADER ================= */}
 
@@ -275,13 +384,25 @@ function App() {
 
         </div>
 
-        <div className="status">
+         <div className="navbar-actions">
 
-          <span className="status-dot"></span>
+  <button
+    className="theme-button"
+    onClick={() => setDarkMode(!darkMode)}
+    title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+  >
+    {darkMode ? "☀️" : "🌙"}
+  </button>
 
-          AI System Ready
+  <div className="status">
 
-        </div>
+    <span className="status-dot"></span>
+
+    AI System Ready
+
+  </div>
+
+</div>
 
       </header>
 
@@ -671,169 +792,201 @@ function App() {
         )}
 
 
-        {/* ================= ANALYSIS HISTORY ================= */}
+       {/* ================= ANALYSIS HISTORY ================= */}
 
-        {history.length > 0 && (
+{history.length > 0 && (
 
-          <section className="history-section">
+  <section className="history-section">
 
-            <div className="history-header">
+    <div className="history-header">
 
-              <div>
+      <div>
 
-                <div className="history-badge">
-                  🕘 Recent Activity
-                </div>
+        <div className="history-badge">
+          🕘 Recent Activity
+        </div>
 
-                <h2>
-                  Analysis History
-                </h2>
+        <h2>
+          Analysis History
+        </h2>
 
-                <p>
-                  Your recent AI image analysis results
-                </p>
+        <p>
+          Your recent AI image analysis results
+        </p>
+
+      </div>
+
+      <button
+        className="clear-history-button"
+        onClick={clearHistory}
+      >
+        🗑️ Clear History
+      </button>
+
+    </div>
+
+
+    {/* ================= TIMELINE ================= */}
+
+    <div className="history-timeline">
+
+      {history.map((item) => (
+
+        <div
+          className="history-timeline-item"
+          key={item.id}
+        >
+
+          {/* TIMELINE DOT */}
+
+          <div className="history-timeline-dot">
+            <span></span>
+          </div>
+
+
+          {/* HISTORY CARD */}
+
+          <div
+            className="history-card"
+            onClick={() =>
+              openHistoryItem(item)
+            }
+          >
+
+            {/* IMAGE */}
+
+            {item.preview_image ? (
+
+              <img
+                src={item.preview_image}
+                alt={item.filename}
+                className="history-thumbnail"
+              />
+
+            ) : (
+
+              <div className="history-file-icon">
+                🖼️
+              </div>
+
+            )}
+
+
+            {/* FILE INFORMATION */}
+
+            <div className="history-card-top">
+
+              <div className="history-file-info">
+
+                <strong>
+                  {item.filename}
+                </strong>
+
+                <span>
+                  {item.date}
+                </span>
 
               </div>
 
-              <button
-                className="clear-history-button"
-                onClick={clearHistory}
-              >
-                🗑️ Clear History
-              </button>
+            </div>
+
+
+            {/* SUMMARY */}
+
+            <div className="history-summary">
+
+              <div>
+
+                <span>
+                  Objects
+                </span>
+
+                <strong>
+                  {Object.values(
+                    item.object_counts || {}
+                  ).reduce(
+                    (sum, count) =>
+                      sum + count,
+                    0
+                  )}
+                </strong>
+
+              </div>
+
+
+              <div>
+
+                <span>
+                  Types
+                </span>
+
+                <strong>
+                  {Object.keys(
+                    item.object_counts || {}
+                  ).length}
+                </strong>
+
+              </div>
+
+
+              <div>
+
+                <span>
+                  AI
+                </span>
+
+                <strong>
+                  YOLO
+                </strong>
+
+              </div>
 
             </div>
 
 
-            <div className="history-grid">
+            {/* OBJECT TAGS */}
 
-              {history.map((item) => (
+            <div className="history-objects">
 
-                <div
-                  className="history-card"
-                  key={item.id}
-                  onClick={() =>
-                    openHistoryItem(item)
-                  }
-                >
+              {Object.entries(
+                item.object_counts || {}
+              ).map(
+                ([objectName, count]) => (
 
-                  <div className="history-card-top">
+                  <span
+                    key={objectName}
+                    className="history-object-tag"
+                  >
+                    {objectName} × {count}
+                  </span>
 
-  {item.preview_image ? (
-    <img
-      src={item.preview_image}
-      alt={item.filename}
-      className="history-thumbnail"
-    />
-  ) : (
-    <div className="history-file-icon">
-      🖼️
+                )
+              )}
+
+            </div>
+
+
+            {/* CLICK HINT */}
+
+            <div className="history-click-hint">
+              Click to view result →
+            </div>
+
+          </div>
+
+        </div>
+
+      ))}
+
     </div>
-  )}
 
-  <div className="history-file-info">
+  </section>
 
-                      <strong>
-                        {item.filename}
-                      </strong>
-
-                      <span>
-                        {item.date}
-                      </span>
-
-                    </div>
-
-                  </div>
-
-
-                  <div className="history-summary">
-
-                    <div>
-
-                      <span>
-                        Objects
-                      </span>
-
-                      <strong>
-                        {Object.values(
-                          item.object_counts || {}
-                        ).reduce(
-                          (sum, count) =>
-                            sum + count,
-                          0
-                        )}
-                      </strong>
-
-                    </div>
-
-
-                    <div>
-
-                      <span>
-                        Types
-                      </span>
-
-                      <strong>
-                        {Object.keys(
-                          item.object_counts || {}
-                        ).length}
-                      </strong>
-
-                    </div>
-
-
-                    <div>
-
-                      <span>
-                        AI
-                      </span>
-
-                      <strong>
-                        YOLO
-                      </strong>
-
-                    </div>
-
-                  </div>
-
-
-                  <div className="history-objects">
-
-                    {Object.entries(
-                      item.object_counts || {}
-                    ).map(
-                      ([objectName, count]) => (
-
-                        <span
-                          key={objectName}
-                          className="history-object-tag"
-                        >
-                          {objectName} × {count}
-                        </span>
-
-                      )
-                    )}
-
-                  </div>
-
-                  <div className="history-click-hint">
-                    Click to view result →
-                  </div>
-
-                </div>
-
-              ))}
-
-            </div>
-
-          </section>
-
-        )}
-
+)}
 
         {/* ================= RESULT ================= */}
 
-        {false && (
+        {result && (
 
           <section className="results">
 
@@ -1062,7 +1215,7 @@ function App() {
 
             {/* RESULT IMAGE */}
 
-            {false && (
+            {result?.result_image && (
 
               <div className="result-image-card">
 
@@ -1227,10 +1380,12 @@ function App() {
         /* ================= MAIN ================= */
 
         .container {
-          max-width: 1100px;
-          margin: auto;
-          padding: 60px 20px;
-        }
+        width: 100%;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 60px 20px;
+        box-sizing: border-box;
+       }
 
 
         /* ================= HERO ================= */
@@ -1525,26 +1680,31 @@ function App() {
         }
 
         .dashboard-stats {
-          display: grid;
-          grid-template-columns:
-            repeat(3, 1fr);
-          gap: 18px;
-        }
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        width: 100%;
+        box-sizing: border-box;
+       }
 
-        .dashboard-stat-card {
-          background: white;
-          padding: 22px;
-          border-radius: 18px;
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          border: 1px solid #e8edf5;
-          box-shadow:
-            0 10px 30px
-            rgba(15, 23, 42, 0.05);
-          transition: 0.25s;
-        }
-
+       .dashboard-stat-card {
+  background: white;
+  padding: 22px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border: 1px solid #e8edf5;
+  box-shadow:
+    0 10px 30px
+    rgba(15, 23, 42, 0.05);
+  transition: 0.25s;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
         .dashboard-stat-card:hover {
           transform: translateY(-4px);
           box-shadow:
@@ -1563,10 +1723,15 @@ function App() {
           font-size: 23px;
         }
 
-        .dashboard-stat-card span {
-          display: block;
-          color: #8a93a3;
-          font-size: 12px;
+         .dashboard-stat-card span {
+         display: block;
+         color: #8a93a3;
+         font-size: 12px;
+         min-width: 0;
+         max-width: 100%;
+         overflow: hidden;
+         text-overflow: ellipsis;
+         white-space: nowrap;
         }
 
         .dashboard-stat-card strong {
@@ -1636,210 +1801,306 @@ function App() {
 
         /* ================= HISTORY ================= */
 
-        .history-section {
-          margin-top: 55px;
-        }
+.history-section {
+  margin-top: 55px;
+}
 
-        .history-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 20px;
-          margin-bottom: 25px;
-        }
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 35px;
+}
 
-        .history-badge {
-          display: inline-block;
-          background: #eef3ff;
-          color: #2563eb;
-          padding: 7px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 700;
-        }
+.history-badge {
+  display: inline-block;
+  background: #eef3ff;
+  color: #2563eb;
+  padding: 7px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+}
 
-        .history-header h2 {
-          margin: 12px 0 5px;
-          font-size: 30px;
-        }
+.history-header h2 {
+  margin: 12px 0 5px;
+  font-size: 30px;
+}
 
-        .history-header p {
-          color: #7b8494;
-          margin: 0;
-        }
+.history-header p {
+  color: #7b8494;
+  margin: 0;
+}
 
-        .clear-history-button {
-          border: none;
-          background: #fff1f2;
-          color: #dc2626;
-          padding: 11px 16px;
-          border-radius: 10px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: 0.2s;
-        }
+.clear-history-button {
+  border: none;
+  background: #fff1f2;
+  color: #dc2626;
+  padding: 11px 16px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s;
+}
 
-        .clear-history-button:hover {
-          background: #ffe4e6;
-          transform: translateY(-2px);
-        }
-
-        .history-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 18px;
-        width: 100%;
-        max-width: 100%;
-       }
-
-        .history-card {
-          background: white;
-          padding: 20px;
-          border-radius: 18px;
-          border: 1px solid #e8edf5;
-          box-shadow:
-            0 10px 30px
-            rgba(15, 23, 42, 0.05);
-          transition: 0.25s;
-          cursor: pointer;
-        }
-
-        .history-card:hover {
-          transform: translateY(-4px);
-          box-shadow:
-            0 15px 35px
-            rgba(37, 99, 235, 0.12);
-          border-color: #cbd8ff;
-        }
-
-        .history-card-top {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .history-file-icon {
-        .history-thumbnail {
-        width: 100%;
-        height: 180px;
-        object-fit: cover;
-        display: block;
-        border-radius: 14px;
-        margin-bottom: 15px;
-       }
-
-        .history-file-icon {
-        width: 45px;
-        height: 45px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #eef3ff;
-        font-size: 22px;
-       }
-
-        .history-file-info {
-          min-width: 0;
-        }
-
-        .history-file-info strong {
-          display: block;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .history-file-info span {
-          display: block;
-          margin-top: 5px;
-          color: #8a93a3;
-          font-size: 12px;
-        }
-
-        .history-summary {
-          display: grid;
-          grid-template-columns:
-            repeat(3, 1fr);
-          gap: 10px;
-          margin-top: 20px;
-          padding-top: 18px;
-          border-top: 1px solid #edf0f5;
-        }
-
-        .history-summary div {
-          text-align: center;
-        }
-
-        .history-summary span {
-          display: block;
-          color: #8a93a3;
-          font-size: 11px;
-        }
-
-        .history-summary strong {
-          display: block;
-          margin-top: 5px;
-          font-size: 15px;
-        }
-
-        .history-objects {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-          margin-top: 18px;
-        }
-
-        .history-object-tag {
-          background: #f1f5ff;
-          color: #315edb;
-          padding: 6px 9px;
-          border-radius: 8px;
-          font-size: 11px;
-          font-weight: 600;
-        }
-
-        .history-click-hint {
-          margin-top: 18px;
-          color: #2563eb;
-          font-size: 12px;
-          font-weight: 700;
-          text-align: right;
-        }
+.clear-history-button:hover {
+  background: #ffe4e6;
+  transform: translateY(-2px);
+}
 
 
-        /* ================= RESULTS ================= */
+/* ================= TIMELINE ================= */
 
-        .results {
-          margin-top: 55px;
-        }
+.history-timeline {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 0 10px 55px;
+  box-sizing: border-box;
+}
 
-        .result-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 20px;
-        }
 
-        .success-badge {
-          display: inline-block;
-          background: #dcfce7;
-          color: #15803d;
-          padding: 7px 12px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 700;
-        }
+/* VERTICAL LINE */
 
-        .result-header h2 {
-          margin:
-            12px 0 5px;
-          font-size: 30px;
-        }
+.history-timeline::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(
+    to bottom,
+    #2563eb,
+    #7c3aed,
+    #c7d2fe
+  );
+  border-radius: 10px;
+}
 
-        .result-header p {
-          color: #7b8494;
-        }
+
+/* TIMELINE ITEM */
+
+.history-timeline-item {
+  position: relative;
+  margin-bottom: 25px;
+}
+
+.history-timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+
+/* ================= TIMELINE DOT ================= */
+
+.history-timeline-dot {
+  position: absolute;
+  left: -44px;
+  top: 28px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  border: 3px solid #2563eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow:
+    0 0 0 6px rgba(37, 99, 235, 0.10);
+}
+
+.history-timeline-dot span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+
+/* ================= HISTORY CARD ================= */
+
+.history-card {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  background: white;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid #e8edf5;
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.05);
+  transition: 0.25s;
+  cursor: pointer;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.history-card:hover {
+  transform: translateX(5px);
+  box-shadow:
+    0 15px 35px rgba(37, 99, 235, 0.12);
+  border-color: #cbd8ff;
+}
+
+
+/* ================= IMAGE ================= */
+
+.history-thumbnail {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  display: block;
+  border-radius: 14px;
+  margin-bottom: 15px;
+}
+
+
+/* ================= FILE ICON ================= */
+
+.history-file-icon {
+  width: 55px;
+  height: 55px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef3ff;
+  font-size: 25px;
+  margin-bottom: 15px;
+}
+
+
+/* ================= CARD TOP ================= */
+
+.history-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.history-file-info {
+  min-width: 0;
+  width: 100%;
+}
+
+.history-file-info strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+}
+
+.history-file-info span {
+  display: block;
+  margin-top: 5px;
+  color: #8a93a3;
+  font-size: 12px;
+}
+
+
+/* ================= SUMMARY ================= */
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #edf0f5;
+}
+
+.history-summary div {
+  text-align: center;
+}
+
+.history-summary span {
+  display: block;
+  color: #8a93a3;
+  font-size: 11px;
+}
+
+.history-summary strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 15px;
+}
+
+
+/* ================= OBJECT TAGS ================= */
+
+.history-objects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.history-object-tag {
+  background: #f1f5ff;
+  color: #315edb;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+
+/* ================= CLICK HINT ================= */
+
+.history-click-hint {
+  margin-top: 18px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+
+/* ================= TIMELINE RESPONSIVE ================= */
+
+@media (max-width: 700px) {
+
+  .history-header {
+    flex-direction: column;
+  }
+
+  .clear-history-button {
+    width: 100%;
+  }
+
+  .history-timeline {
+    padding-left: 42px;
+  }
+
+  .history-timeline::before {
+    left: 15px;
+    width: 2px;
+  }
+
+  .history-timeline-dot {
+    left: -38px;
+    width: 20px;
+    height: 20px;
+  }
+
+  .history-card {
+    padding: 16px;
+  }
+
+  .history-thumbnail {
+    max-height: 220px;
+  }
+
+  .history-summary {
+    gap: 5px;
+  }
+
+}
 
 
         /* ================= RESULT STATS ================= */
@@ -2006,13 +2267,32 @@ function App() {
         }
 
         .result-image {
-          margin-top: 20px;
-          width: 100%;
-          max-height: 650px;
-          object-fit: contain;
-          border-radius: 15px;
-          background: #f5f7fa;
-        }
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 400px;
+  margin: 20px auto 0;
+  object-fit: contain;
+  border-radius: 15px;
+  background: #f5f7fa;
+}
+        @media (max-width: 700px) {
+  .result-image-card {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .result-image {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 350px;
+    object-fit: contain;
+  }
+}
 
 
         /* ================= FOOTER ================= */
@@ -2066,6 +2346,8 @@ function App() {
 
           .dashboard-stats {
             grid-template-columns: 1fr;
+            width: 100%;
+            max-width: 100%;
           }
 
           .preview-header {
@@ -2093,8 +2375,238 @@ function App() {
           .result-header .new-analysis {
             width: 100%;
           }
+            .results {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.result-image-card {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.result-image {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 350px;
+  object-fit: contain;
+}
 
         }
+          /* ================= DARK MODE ================= */
+
+.dark-mode {
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+.dark-mode .navbar {
+  background: #111827;
+  border-color: #1f2937;
+}
+
+.dark-mode .brand h1 {
+  color: #f8fafc;
+}
+
+.dark-mode .brand span {
+  color: #94a3b8;
+}
+
+.dark-mode .status {
+  color: #4ade80;
+}
+
+.dark-mode .hero h2 {
+  color: #f8fafc;
+}
+
+.dark-mode .hero p {
+  color: #94a3b8;
+}
+
+.dark-mode .hero-badge {
+  background: #172554;
+  color: #60a5fa;
+}
+
+.dark-mode .upload-card {
+  background: #111827;
+  border-color: #334155;
+}
+
+.dark-mode .upload-card:hover,
+.dark-mode .drag-active {
+  background: #172033;
+  border-color: #3b82f6;
+}
+
+.dark-mode .upload-content h3 {
+  color: #f8fafc;
+}
+
+.dark-mode .upload-content p,
+.dark-mode .upload-content small {
+  color: #94a3b8;
+}
+
+.dark-mode .preview-image {
+  background: #1e293b;
+}
+
+.dark-mode .loading-card,
+.dark-mode .dashboard-stat-card,
+.dark-mode .statistics-card,
+.dark-mode .history-card,
+.dark-mode .objects-card,
+.dark-mode .details-card,
+.dark-mode .result-image-card,
+.dark-mode .stat-card {
+  background: #111827;
+  border-color: #1f2937;
+  color: #e5e7eb;
+}
+
+.dark-mode .dashboard-header h2,
+.dark-mode .history-header h2,
+.dark-mode .section-title h3 {
+  color: #f8fafc;
+}
+
+.dark-mode .dashboard-header p,
+.dark-mode .history-header p,
+.dark-mode .section-title p {
+  color: #94a3b8;
+}
+
+.dark-mode .dashboard-badge,
+.dark-mode .history-badge {
+  background: #172554;
+  color: #60a5fa;
+}
+
+.dark-mode .dashboard-stat-icon,
+.dark-mode .history-file-icon,
+.dark-mode .stat-icon {
+  background: #172554;
+}
+
+.dark-mode .dashboard-stat-card span,
+.dark-mode .statistics-info span,
+.dark-mode .history-file-info span,
+.dark-mode .dashboard-header p {
+  color: #94a3b8;
+}
+
+.dark-mode .statistics-bar,
+.dark-mode .confidence-bar,
+.dark-mode .loading-bar {
+  background: #334155;
+}
+
+.dark-mode .history-summary {
+  border-color: #1f2937;
+}
+
+.dark-mode .history-object-tag {
+  background: #172554;
+  color: #93c5fd;
+}
+
+.dark-mode .object-item {
+  background: #1e293b;
+}
+
+.dark-mode .object-item span {
+  color: #94a3b8;
+}
+
+.dark-mode .result-image {
+  background: #1e293b;
+}
+
+.dark-mode footer p {
+  color: #cbd5e1;
+}
+
+.dark-mode footer {
+  color: #64748b;
+}
+
+
+/* ================= THEME BUTTON ================= */
+
+.theme-button {
+  border: 1px solid #dbe2ea;
+  background: white;
+  color: #172033;
+  padding: 10px 15px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.theme-button:hover {
+  transform: translateY(-2px);
+}
+
+.dark-mode .theme-button {
+  background: #1e293b;
+  border-color: #334155;
+  color: #f8fafc;
+}
+  @media (max-width: 700px) {
+  .result-image-card {
+    padding: 15px;
+  }
+
+  .result-image {
+    width: 100%;
+    height: auto;
+    max-height: 350px;
+    max-width: 100%;
+    box-sizing: border-box;
+    object-fit: contain;
+  }
+}
+    .dashboard-stats {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+    .dashboard-stat-card > div:last-child {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dashboard-stat-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+  .dashboard-stat-card {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .dashboard-stat-card strong {
+    overflow-wrap: anywhere;
+  }
+
+  .statistics-card {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
 
       `}</style>
 
