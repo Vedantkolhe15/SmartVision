@@ -70,7 +70,7 @@ h1,
 h2 {
   font-family: var(--heading);
   font-weight: 500;
-  color: var(--text-h);
+  color: #172033;
 }
 
 h1 {
@@ -100,7 +100,7 @@ code,
   font-family: var(--mono);
   display: inline-flex;
   border-radius: 4px;
-  color: var(--text-h);
+  color: #172033;
 }
 
 code {
@@ -108,4 +108,12 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
+}
+/* SmartVision heading colors */
+body:not(.dark-mode) {
+  --text-h: #172033;
+}
+
+body.dark-mode {
+  --text-h: #f3f4f6;
 }
