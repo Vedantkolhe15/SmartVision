@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+
+uploads/
+results/
+detection_result.jpg
+main_backup.py
+main_current_backup.py
+main_changes_backup.txt
